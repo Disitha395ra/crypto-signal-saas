@@ -1,14 +1,32 @@
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth, db } from "../../services/firebase";
+
+const COUNTRIES = [
+  "Sri Lanka",
+  "India",
+  "Pakistan",
+  "Bangladesh",
+  "Nepal",
+  "Maldives",
+  "United States",
+  "United Kingdom",
+  "Canada",
+  "Australia",
+  "New Zealand",
+  "Germany",
+  "France",
+  "Japan",
+  "Singapore",
+  "UAE",
+];
 
 export default function Signup() {
   const navigate = useNavigate();
   const location = useLocation();
   const selectedPlan = location.state?.plan;
-
-   //seLocation() → Home page එකෙන් එවපු data bag එක ගන්නවා
-   //location.state → Home page එකෙන් එවපු state object එක
-   //?.plan → ඒක ඇතුළේ තියෙන plan එක catch කරනවා
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -17,40 +35,55 @@ export default function Signup() {
     password: "",
     confirmPassword: "",
     country: "",
-    cardName: "",
-    cardNumber: "",
-    cvv: "",
-    expiry: "",
   });
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-
-    // Basic validations
-    if (formData.password !== formData.confirmPassword) {
-      alert("Passwords do not match");
-      return;
-    }
 
     if (!selectedPlan) {
       alert("No subscription plan selected");
       return;
     }
 
-    // 🔒 Later: send this to backend / payment gateway
-    console.log("Signup Data:", formData);
-    console.log("Selected Plan:", selectedPlan);
+    if (formData.password !== formData.confirmPassword) {
+      alert("Passwords do not match");
+      return;
+    }
 
-    alert(
-      "Signup successful! Verification email will be sent (mock step)."
-    );
+    try {
+      // 1️⃣ Create Firebase Auth user
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        formData.email,
+        formData.password
+      );
+      const user = userCredential.user;
 
-    // After email verification → dashboard
-    navigate("/dashboard");
+      // 2️⃣ Send verification email
+      await sendEmailVerification(user);
+
+      // 3️⃣ Store user profile in Firestore (no payment info here)
+      await setDoc(doc(db, "users", user.uid), {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        country: formData.country,
+        plan: selectedPlan.name,
+        billingCycle: selectedPlan.billing || "monthly",
+        trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 1-week free trial
+        isActive: false,
+        createdAt: serverTimestamp(),
+      });
+
+      alert("Verification email sent. Please verify before login.");
+      navigate("/login");
+    } catch (error) {
+      alert(error.message);
+    }
   };
 
   return (
@@ -113,49 +146,20 @@ export default function Signup() {
             />
           </div>
 
-          <input
+          {/* Country Dropdown */}
+          <select
             name="country"
-            placeholder="Country"
             onChange={handleChange}
             required
             className="border p-2 rounded w-full"
-          />
-
-          {/* Payment Info */}
-          <h3 className="font-semibold mt-4">Payment Details</h3>
-
-          <input
-            name="cardName"
-            placeholder="Card Holder Name"
-            onChange={handleChange}
-            required
-            className="border p-2 rounded w-full"
-          />
-
-          <input
-            name="cardNumber"
-            placeholder="Card Number"
-            onChange={handleChange}
-            required
-            className="border p-2 rounded w-full"
-          />
-
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              name="expiry"
-              placeholder="MM/YY"
-              onChange={handleChange}
-              required
-              className="border p-2 rounded"
-            />
-            <input
-              name="cvv"
-              placeholder="CVV"
-              onChange={handleChange}
-              required
-              className="border p-2 rounded"
-            />
-          </div>
+          >
+            <option value="">Select Country</option>
+            {COUNTRIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
 
           <button
             type="submit"
