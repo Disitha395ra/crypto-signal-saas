@@ -13,7 +13,10 @@ export default function Home() {
 
   const handleSelect = (plan) => {
     // Navigate to Signup page and pass selected plan
-    navigate("/signup", { state: { plan } });
+    navigate("/signup", { state: { plan } });       //User plan එක select කරනවා
+                                                    //ඒ select කරපු plan එක
+                                                    // state කියන object එකක් ඇතුළේ
+                                                    // Signup page එකට යවලා තියෙනවා
   };
 
   return (
