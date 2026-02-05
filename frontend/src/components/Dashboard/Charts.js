@@ -1,105 +1,99 @@
-import React from "react";
-import 'chartjs-adapter-date-fns';
+import React, { useEffect, useState } from "react";
+import { Line } from "react-chartjs-2";
+import axios from "axios";
+import { auth } from "../../services/firebase";
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
-  TimeScale,
+  PointElement,
+  LineElement,
   Tooltip,
   Legend,
-  Title,
 } from "chart.js";
-import { Chart } from "react-chartjs-2";
-import { CandlestickController, CandlestickElement } from "chartjs-chart-financial";
-import 'chartjs-adapter-date-fns';
 
-// Register Chart.js & financial plugins
 ChartJS.register(
   CategoryScale,
   LinearScale,
-  TimeScale,
+  PointElement,
+  LineElement,
   Tooltip,
-  Legend,
-  Title,
-  CandlestickController,
-  CandlestickElement
+  Legend
 );
 
-export default function Charts({ data, symbol, duration }) {
-  if (!data || data.length === 0) return <div>No chart data</div>;
+export default function Charts({ symbol, duration }) {
+  const [chartData, setChartData] = useState(null);
 
-  // Prepare candlestick data
-  const chartData = {
-    datasets: [
-      {
-        label: `${symbol} Candles`,
-        data: data.map(d => ({
-          x: new Date(d.time), // time should be timestamp in ms
-          o: d.open,
-          h: d.high,
-          l: d.low,
-          c: d.close,
-        })),
-        borderColor: "rgba(75,192,192,1)",
-        backgroundColor: (ctx) => {
-          const val = ctx.dataset.data[ctx.dataIndex];
-          return val.c > val.o ? "rgba(0,200,0,0.6)" : "rgba(200,0,0,0.6)";
-        },
-      },
-      // EMA9 overlay
-      {
-        label: "EMA9",
-        type: "line",
-        data: data.map(d => ({ x: new Date(d.time), y: d.ema9 })),
-        borderColor: "blue",
-        borderWidth: 1,
-        tension: 0.2,
-        pointRadius: 0,
-      },
-      // EMA21 overlay
-      {
-        label: "EMA21",
-        type: "line",
-        data: data.map(d => ({ x: new Date(d.time), y: d.ema21 })),
-        borderColor: "orange",
-        borderWidth: 1,
-        tension: 0.2,
-        pointRadius: 0,
-      },
-    ],
-  };
+  useEffect(() => {
+    let timer;
 
-  const options = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: "top",
-      },
-      title: {
-        display: true,
-        text: `${symbol} Candlestick Chart (${duration})`,
-      },
-      tooltip: {
-        mode: 'index',
-        intersect: false,
-      },
-    },
-    scales: {
-      x: {
-        type: "time",
-        time: {
-          unit: duration === "1d" ? "day" : "minute",
-          tooltipFormat: "dd MMM yyyy HH:mm",
-        },
-        ticks: {
-          maxRotation: 0,
-        },
-      },
-      y: {
-        position: "left",
-      },
-    },
-  };
+    const fetchData = async () => {
+      try {
+        // ⏳ WAIT until Firebase auth is ready
+        const user = auth.currentUser;
+        if (!user) return;
 
-  return <Chart type="candlestick" data={chartData} options={options} />;
+        const token = await user.getIdToken();
+
+        const res = await axios.get(
+          `http://127.0.0.1:8000/signals/${symbol}?interval=${duration}&limit=10`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        const data = res.data;
+
+        setChartData({
+          labels: data.map(d =>
+            new Date(d.open_time).toLocaleTimeString()
+          ),
+          datasets: [
+            {
+              label: "Price",
+              data: data.map(d => d.close),
+              borderWidth: 2,
+              tension: 0.3,
+            },
+            {
+              label: "EMA 9",
+              data: data.map(d => d.ema9),
+              borderDash: [5, 5],
+            },
+            {
+              label: "EMA 21",
+              data: data.map(d => d.ema21),
+              borderDash: [2, 2],
+            },
+            {
+              label: "Decision",
+              data: data.map(d => (d.signal ? d.close : null)),
+              pointRadius: 9,
+              pointBackgroundColor: data.map(d =>
+                d.signal === "BUY"
+                  ? "green"
+                  : d.signal === "SELL"
+                  ? "red"
+                  : "gray"
+              ),
+              showLine: false,
+            },
+          ],
+        });
+      } catch (err) {
+        console.error("Chart fetch error:", err);
+      }
+    };
+
+    fetchData();
+    timer = setInterval(fetchData, 5000);
+
+    return () => clearInterval(timer);
+  }, [symbol, duration]);
+
+  if (!chartData) return <p>Loading chart…</p>;
+
+  return <Line data={chartData} />;
 }

@@ -1,60 +1,45 @@
 from fastapi import FastAPI, Query, Depends, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
-
-# Firebase Admin
+import time
 import firebase_admin
 from firebase_admin import credentials, firestore, auth
 
-# Your existing modules
 from binance import get_klines
 from indicators import apply_indicators, generate_signal
 
-# ---------------------
-# Firebase Init
-# ---------------------
 cred = credentials.Certificate("serviceAccountKey.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# ---------------------
-# FastAPI App
-# ---------------------
-app = FastAPI(title="Crypto Signal API", version="1.0")
+app = FastAPI(title="Crypto Signal API", version="1.3")
 
-# ---------------------
-# Helper: Convert numpy → JSON-safe
-# ---------------------
-def safe_float_conversion(df: pd.DataFrame) -> pd.DataFrame:
-    for col in df.select_dtypes(include=[np.float64, np.float32]).columns:
-        df[col] = df[col].apply(float)
-    return df
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# ---------------------
-# All Symbols & Subscription Limits
-# ---------------------
-ALL_SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-    "XRPUSDT", "ADAUSDT", "DOGEUSDT", "AVAXUSDT"
-]
+def clean_for_json(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.replace([np.inf, -np.inf], np.nan)
+    return df.where(pd.notnull(df), None)
 
-SYMBOL_LIMITS = {
-    "1 Month": 3,
-    "6 Months": 6,
-    "12 Months": len(ALL_SYMBOLS)  # all symbols
-}
+ALL_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT"]
+SYMBOL_LIMITS = {"1 Month": 3, "6 Months": 6, "12 Months": len(ALL_SYMBOLS)}
 
 def allowed_symbols(plan: str):
-    if plan not in SYMBOL_LIMITS:
-        return []
-    return ALL_SYMBOLS[:SYMBOL_LIMITS[plan]]
+    return ALL_SYMBOLS[:SYMBOL_LIMITS.get(plan, 0)]
 
-# ---------------------
-# Auth Dependency
-# ---------------------
-def get_current_user(authorization: str = Header(...)):
+# 🔥 FIXED AUTH (NO MORE 422)
+def get_current_user(authorization: str | None = Header(default=None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
+        raise HTTPException(status_code=401, detail="Invalid auth header")
 
     token = authorization.replace("Bearer ", "")
     try:
@@ -63,71 +48,37 @@ def get_current_user(authorization: str = Header(...)):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-# ---------------------
-# Signals API (Protected)
-# ---------------------
 @app.get("/signals/{symbol}")
 def get_signals(
     symbol: str,
-    interval: str = Query("5m", pattern="^[1-9][0-9]*[mhd]$"),
-    limit: int = Query(50, ge=1, le=100),
-    user_id: str = Depends(get_current_user)
+    interval: str = Query("5m"),
+    limit: int = Query(10, ge=5, le=20),
+    user_id: str = Depends(get_current_user),
 ):
-    try:
-        symbol = symbol.upper()
+    symbol = symbol.upper()
 
-        # 🔐 Load user subscription from Firestore
-        user_ref = db.collection("users").document(user_id)
-        user_doc = user_ref.get()
+    user_doc = db.collection("users").document(user_id).get()
+    if not user_doc.exists:
+        raise HTTPException(status_code=403, detail="User not found")
 
-        if not user_doc.exists:
-            raise HTTPException(status_code=403, detail="User not found")
+    plan = user_doc.to_dict().get("plan")
+    if symbol not in allowed_symbols(plan):
+        raise HTTPException(status_code=403, detail="Symbol not allowed")
 
-        user = user_doc.to_dict()
-        plan = user.get("plan")  # ✅ use plan field
+    df = get_klines(symbol, interval).tail(limit + 30)
+    df = apply_indicators(df)
+    df = generate_signal(df)
+    df = df.tail(limit)
 
-        allowed = allowed_symbols(plan)
+    now_ms = int(time.time() * 1000)
+    df["time_gap_ms"] = df["open_time"].apply(
+        lambda t: int(t.timestamp() * 1000) - now_ms
+    )
 
-        if not allowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Your subscription plan is invalid or has no symbols"
-            )
+    df["is_current"] = df["time_gap_ms"] <= 0
+    df["is_future"] = df["time_gap_ms"] > 0
 
-        if symbol not in allowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"{symbol} not allowed for your subscription plan"
-            )
+    df = df.round(2)
+    df = clean_for_json(df)
 
-        # 1️⃣ Fetch candles
-        df = get_klines(symbol, interval)
-
-        # 2️⃣ Apply indicators
-        df = apply_indicators(df)
-
-        # 3️⃣ Generate signals
-        df = generate_signal(df)
-
-        # 4️⃣ Limit candles
-        df = df.tail(limit)
-
-        # 5️⃣ Safe JSON conversion
-        df = safe_float_conversion(df)
-
-        # 6️⃣ Round values for cleaner JSON
-        df = df.round({
-            "close": 2,
-            "ema9": 2,
-            "ema21": 2,
-            "rsi": 2,
-            "macd": 2,
-            "macd_signal": 2,
-        })
-
-        return df.to_dict(orient="records")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        return {"error": str(e)}
+    return df.to_dict(orient="records")

@@ -82,7 +82,7 @@ export default function Dashboard() {
 
         // Call your FastAPI backend
         const response = await axios.get(
-          `http://127.0.0.1:8000/signals/${symbol}?interval=${duration}&limit=50`,
+          `http://127.0.0.1:8000/signals/${symbol}?interval=${duration}&limit=20`,
           {
             headers: {
               Authorization: `Bearer ${token}`
