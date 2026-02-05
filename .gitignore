@@ -1,0 +1,23 @@
+# ===== Python =====
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+
+# ===== FastAPI =====
+*.log
+
+# ===== Node / React =====
+node_modules/
+dist/
+build/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== IDE =====
+.vscode/
+.idea/
