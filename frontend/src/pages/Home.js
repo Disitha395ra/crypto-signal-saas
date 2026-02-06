@@ -1,6 +1,8 @@
 // src/pages/Home.js
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import Header from "../pages/Header";
+import Footer from "../pages/Footer";
 
 const subscriptions = [
   { 
@@ -59,6 +61,9 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-black text-gray-100">
+      {/* Header Component */}
+      <Header />
+
       {/* Hero Section */}
       <div className="max-w-7xl mx-auto px-6 pt-20 pb-12">
         <div className="text-center mb-16">
@@ -233,6 +238,9 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* Footer Component */}
+      <Footer />
     </div>
   );
 }

@@ -145,7 +145,10 @@ export default function Login() {
               Don't have an account?{" "}
               <button
                 type="button"
-                onClick={() => navigate("/")}
+                onClick={() => {
+                  alert("Go to the homepage and select your subscription plan to create an account.");
+                  navigate("/");
+                }}
                 className="text-blue-400 hover:text-blue-300 font-semibold"
               >
                 Create Account
